@@ -82,7 +82,6 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_toke
             prompt += "Voici les comptes P&L à associer :\n" + "\n".join(coa_pl)
 
         total_tokens += len(encoding.encode(prompt))
-        st.write(f"prompt tokens: {prompt_tokens}")
     return total_tokens
 base_prompt =     """Act as an expert in international accounting. Help me match a foreign accounting account (account number + label) to a French PCG account from a predetermined list.
 The list contains two types of accounts:
