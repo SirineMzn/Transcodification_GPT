@@ -2,17 +2,46 @@ import pandas as pd
 import tiktoken
 import os
 import streamlit as st
-import openai
-import time
+import re
 base_dir = os.path.dirname(__file__)  # Le répertoire du script actuel
 coa_file_path = os.path.join(base_dir, 'data', 'COA_simplifié_TC2.xlsx')
 coa = pd.read_excel(coa_file_path)
+# fonction to unify account type in one format
+def clean_text(text):
+    # if not str convert value to string
+    if not isinstance(text, str):
+        text = str(text)
+    
+    # convert to lowercase
+    text_cleaned = text.lower()
+    
+    # replacements to apply
+    replacements = {
+        'BS': ['bs', 'b s'],
+        'P&L': ['pnl', 'p l', 'pl', 'p and l']
+    }
+    # Remove special characters
+    text_cleaned = re.sub(r'[^a-zA-Z\s]', ' ', text_cleaned)
+    
+    # Remove extra whitespaces
+    text_cleaned = re.sub(r'\s+', ' ', text_cleaned).strip()
+    # Replace each of bs and p&l with the key
+    for replacement, patterns in replacements.items():
+        # Créer une expression régulière pour les mots dans `patterns`
+        pattern = r'\b(?:' + '|'.join(map(re.escape, patterns)) + r')\b'
+        text_cleaned = re.sub(pattern, replacement, text_cleaned)
+    
+
+    
+    return text_cleaned
+coa['BS / P&L'] = coa['BS / P&L'].apply(clean_text)
+
 coa_bs = coa[coa['BS / P&L'] == 'BS']
 coa_pl = coa[coa['BS / P&L'] == 'P&L']
 del coa
 coa_bs = coa_bs.apply(lambda row: f"""{row['GL account']} - {row['Account Name']} - {row['BS / P&L']}""", axis=1).tolist()
 coa_pl = coa_pl.apply(lambda row: f"""{row['GL account']} - {row['Account Name']} - {row['BS / P&L']}""", axis=1).tolist()
-file_path = os.path.join(base_dir, 'Test', "test_transco_v2.xlsx")  
+
 def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles =50,max_tokens = 16000):
 # Charger l'encodeur de tokens pour le modèle
     encoding = tiktoken.encoding_for_model(model)
@@ -45,69 +74,60 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_toke
     while remaining_lines:
         prompt, remaining_lines, prompt_tokens = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 50, max_tokens)
         prompt += "\n"
-
+        
         # Ajouter les comptes COA correspondants
         if type_compte == 'BS':
             prompt += "Voici les comptes BS à associer :\n" + "\n".join(coa_bs)
         elif type_compte == 'P&L':
             prompt += "Voici les comptes P&L à associer :\n" + "\n".join(coa_pl)
 
-        # Simuler l'envoi à GPT-3 (remplacez ici par votre appel réel à GPT)
-        print(f"Le prompt envoyé à GPT-3 : {prompt}")
         total_tokens += len(encoding.encode(prompt))
-
+        st.write(f"prompt tokens: {prompt_tokens}")
     return total_tokens
-base_prompt =     """Agis en tant qu'expert en comptabilité internationale. Aide-moi à associer un compte comptable étranger (n° de compte + libellé) à un compte PCG français provenant d'une liste prédéterminée. 
-            La liste contient deux types de comptes :
-            - **BS (Balance Sheet)** : comptes liés au bilan.
-            - **P&L (Profit & Loss)** : comptes liés au compte de résultat.
-
-            Analyse les informations suivantes :
-
-            - **Numéro de compte** : {account_number}
-            - **Libellé** : {label}
-            - **Type** : {account_type}
-
-            Fournis une correspondance précise avec un compte de la liste prédéterminée en indiquant :
-
-            - **Compte COA** : numéro du compte PCG correspondant.
-            - **Lib COA** : libellé du compte PCG correspondant.
-            - **Justification** : explique en détail pourquoi ce compte est le plus approprié.
+base_prompt =     """Act as an expert in international accounting. Help me match a foreign accounting account (account number + label) to a French PCG account from a predetermined list.
+The list contains two types of accounts:
+BS (Balance Sheet): accounts related to the balance sheet.
+P&L (Profit & Loss): accounts related to the income statement.
+Analyze the following information:
+Account Number: {account_number}
+Label: {label}
+Type: {account_type}
+Provide an accurate match with an account from the predetermined list by indicating:
+COA Account: the corresponding PCG account number.
+COA Label: the corresponding PCG account label.
+Justification: explain in detail why this account is the most appropriate.
             """
 
 
 # Main
 def main():
     # Chemin du fichier
-
-    try:
-        print(f"Chargement du fichier : {file_path}")
-        df = pd.read_excel(file_path)
-
-        # Vérification des colonnes requises
+    file_uploaded = st.file_uploader("Please upload an Excel file only.", type=[ "xlsx"])
+    if file_uploaded is not None:
+        df = pd.read_excel(file_uploaded)
+        df['BS ou P&L'] = df['BS ou P&L'].apply(clean_text)
+            # Vérification des colonnes requises
         required_columns = ['N° de compte', 'Libellé', 'BS ou P&L']
-        
+            
         if all(column in df.columns for column in required_columns):
             lines_bs = df[df['BS ou P&L'] == 'BS']
             lines_pl = df[df['BS ou P&L'] == 'P&L']
             del df
-            print("Fichier chargé avec succès!")
+            
             lines_bs = lines_bs.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()
             lines_pl = lines_pl.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()
-            prompt, remaining_lines,prompt_tokens = prepare_prompt_with_limit(base_prompt, lines_bs,'gpt-4', 50,16000)
 
-            prompt_tokens=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4','BS', 16000)
-            
-            cost_per_1000_tokens = 0.03  # Remplacez par le coût réel par 1000 tokens
-            
-            total_cost = (prompt_tokens / 1000) * cost_per_1000_tokens
+            prompt_tokens_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4','BS', 16000)
+            prompt_tokens_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4','P&L', 16000)
+            cost_per_1000_tokens = 0.03
+            total = prompt_tokens_bs + prompt_tokens_pl
+            total_cost = (total / 1000) * cost_per_1000_tokens
 
-            print(f"Nombre total de tokens estimés : {prompt_tokens}")
-            print(f"Coût estimé : {total_cost:.2f} USD")
+            st.write(f"Estimated total number of tokens : {total}")
+            st.write(f"Estimated total cost: {total_cost:.2f} USD")
         else:
-            print("Le fichier ne contient pas les colonnes requises : 'N° de compte', 'Libellé', 'BS ou P&L'.")
-    except Exception as e:
-        print(f"Erreur lors de la lecture du fichier : {e}")
+            st.write("The file does not have columns : 'N° de compte', 'Libellé', 'BS ou P&L'.")
+    
 
 if __name__ == "__main__":
     main()

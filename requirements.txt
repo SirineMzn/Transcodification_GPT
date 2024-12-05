@@ -1,0 +1,7 @@
+pandas 
+openai==0.28
+chardet
+uuid
+pip==24.2
+streamlit==1.39.0
+bcrypt
