@@ -4,6 +4,7 @@ import os
 import streamlit as st
 import re
 import openai
+import io
 openai.api_key = st.secrets["API_key"]["openai_api_key"]
 base_dir = os.path.dirname(__file__)  # Le répertoire du script actuel
 coa_file_path = os.path.join(base_dir, 'data', 'COA_simplifié_TC2.xlsx')
@@ -74,12 +75,13 @@ def extract_from_list(response_list,numbers,account_type):
     block_pattern = r"\*\*Label: (.*?)\*\*.*?\*\*COA Account: (.*?)\*\*.*?\*\*COA Label: (.*?)\*\*.*?\*\*Justification: (.*?)\*\*"
     
     matches = re.findall(block_pattern, response_string, re.DOTALL)
-    
+    index = 0
     for match in matches:
+        number = numbers[index]
         label, coa_account, coa_label, justification = match
-        data.append([label.strip(),account_type,coa_account.strip(), coa_label.strip(), justification.strip()])
-    
-    df = pd.DataFrame(data, columns=['N° de compte','Libelle','BS ou P&L','Compte COA','lib COA','justification'])
+        data.append([number,label.strip(),account_type,coa_account.strip(), coa_label.strip(), justification.strip()])
+        index += 1
+    df = pd.DataFrame(data, columns=['N° de compte','Libelle','BS ou P&L','Compte COA','Libelle COA','Justification'])
     return df
 def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_tokens=16000):
     encoding = tiktoken.encoding_for_model(model)
@@ -99,14 +101,14 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_toke
         total_tokens += len(encoding.encode(prompt))
         messages =[{"role": "user", "content": prompt}]
         try:
-            """response = openai.ChatCompletion.create(
+            response = openai.ChatCompletion.create(
                 model=model,
                 messages=messages,
                 temperature=0.5,
                 max_tokens=max_tokens,  # Limiter la réponse pour éviter de dépasser les quotas
                 
             )
-            results.append(response['choices'][0]['message']['content'])"""
+            results.append(response['choices'][0]['message']['content'])
             total_tokens_gen = len(encoding.encode(results[-1]))
             
         except Exception as e:
@@ -153,16 +155,27 @@ def main():
            
             # Exemple 
             response_list = ["**Label: E&O Reserve.**  **COA Account: 148.**  **COA Label: Other regulated provisions.**  **Justification: E&O Reserve typically covers errors and omissions, aligning with regulated provisions for potential liabilities or risks.****Label: Bank operations.**  **COA Account: 512.**  **COA Label: Bank.**  **Justification: Bank operations involve transactions related to bank accounts, matching the PCG account for bank balances.**"]
-
-            #rep = extract_from_list(response_list)
-            _,_,_,numbers = prepare_prompt_with_limit(base_prompt, lines_bs, 'gpt-4o',50, 16000)
-            # Afficher le DataFrame
-            print(numbers)
             
-            """
-            gen_bs,prompt_tokens_bs,total_gen_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
+            gen_bs,prompt_tokens_bs,total_gen_bs,numbers_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
 
-            gen_pl,prompt_tokens_pl,total_gen_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
+            gen_pl,prompt_tokens_pl,total_gen_pl,numbers_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
+            df_bs = extract_from_list(gen_bs,numbers_bs,'BS')
+            df_pl = extract_from_list(gen_pl,numbers_pl,'P&L')
+            df = pd.concat([df_bs, df_pl], ignore_index=True)
+            # Permettre à l'utilisateur de télécharger le fichier Excel traité
+            output = io.BytesIO()
+            df.to_excel(output, index=False, engine='xlsxwriter')
+            output.seek(0)
+                                # Permettre à l'utilisateur de télécharger le fichier Excel traité
+            st.success("Tap to download your file.")
+            st.download_button(
+                    label="Download processed file",
+                    data=output,
+                    file_name="output_traité.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            # Afficher le DataFrame
+            
             cost_per_1000_tokens_for_prompt = 0.03
             cost_per_1000_tokens_for_gen = 0.02
             total_prompt = prompt_tokens_bs + prompt_tokens_pl
@@ -171,7 +184,7 @@ def main():
             total_cost_gen = (total_gen / 1000) * cost_per_1000_tokens_for_gen
             total_cost = total_cost_prompt + total_cost_gen
             st.write(f"Total cost: ${total_cost:.2f}")
-            """
+            
         else:
             st.write("The file does not have columns : 'N° de compte', 'Libellé', 'BS ou P&L'.")
     
