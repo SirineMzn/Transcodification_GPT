@@ -94,6 +94,24 @@ def extract_from_list(response_list,lines):
     final_df = pd.concat([lines_df, extracted_df], axis=1)
 
     return final_df
+def estimate_prompt_cost(base_prompt, lines, model,acc_type, max_tokens=16000):
+    encoding = tiktoken.encoding_for_model(model)
+    remaining_lines = lines
+    total_tokens = 0
+    while remaining_lines:
+        prompt, remaining_lines, prompt_tokens= prepare_prompt_with_limit(base_prompt, remaining_lines, model, 50, max_tokens)
+        prompt += "\n"
+        # Ajouter les comptes COA correspondants
+        if acc_type == 'BS':
+            prompt += "Voici les comptes BS à associer :\n" + "\n".join(coa_bs)
+        elif acc_type == 'P&L':
+            prompt += "Voici les comptes P&L à associer :\n" + "\n".join(coa_pl)
+
+        total_tokens += len(encoding.encode(prompt))
+        total_tokens += prompt_tokens
+    cost_per_1000_tokens = 0.00250
+    total_cost = (total_tokens / 1000) * cost_per_1000_tokens
+    return total_cost
 def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_tokens=16000):
     encoding = tiktoken.encoding_for_model(model)
     remaining_lines = lines
@@ -165,9 +183,13 @@ def main():
             total_bs = len(lines_bs)
             total_pl = len(lines_pl)
             output = (total_bs + total_pl)*120
+            prompt_cost = estimate_prompt_cost(base_prompt, lines_bs, 'gpt-4o','BS', max_tokens=16000)
+            prompt_cost += estimate_prompt_cost(base_prompt, lines_pl, 'gpt-4o','P&L', max_tokens=16000)
+            print(prompt_cost)
             print(output)
             cost_per_1000_tokens_for_gen = 0.01
             gen_cost = (output / 1000) * cost_per_1000_tokens_for_gen
+            gen_cost = gen_cost + prompt_cost
             st.info(f"Estimated cost: ${gen_cost:.2f}")
 
             if st.button("GO"):
