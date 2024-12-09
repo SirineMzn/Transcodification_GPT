@@ -5,6 +5,7 @@ import streamlit as st
 import re
 import openai
 import io
+import time
 openai.api_key = st.secrets["API_key"]["openai_api_key"]
 base_dir = os.path.dirname(__file__)  # Le répertoire du script actuel
 coa_file_path = os.path.join(base_dir, 'data', 'COA_simplifié_TC2.xlsx')
@@ -63,16 +64,16 @@ def extract_from_list(response_list,acc_type):
     :param response_list: Liste contenant une chaîne unique avec plusieurs blocs de données.
     :return: DataFrame avec les colonnes 'COA Account', 'COA Label', et 'Justification'.
     """
-    print(response_list)
-
+    
     if not response_list :
         raise ValueError("La liste est vide.")
+    st.wrtie(f"started processing {acc_type} accounts")
     response_string = response_list[0]
     data = []
     index_list = 0
     block_pattern = r"\*\*Account Number: (.*?)\*\*.*?\*\*Label: (.*?)\*\*.*?\*\*COA Account: (.*?)\*\*.*?\*\*COA Label: (.*?)\*\*.*?\*\*Justification: (.*?)\*\*"
     while index_list < len(response_list):
-
+        
         matches = re.findall(block_pattern, response_string, re.DOTALL)
         
 
@@ -90,7 +91,8 @@ def extract_from_list(response_list,acc_type):
         columns=['n° de compte','Libelle','BS ou P&L','Compte COA', 'Libelle COA', 'Justification']
     )
 
-
+    st.write(f"Finished processing {len(data)} of {acc_type} accounts")
+    time.sleep(2)
     return df
 def estimate_prompt_cost(base_prompt, lines, model,acc_type, max_tokens=16000):
     encoding = tiktoken.encoding_for_model(model)
@@ -135,13 +137,13 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_toke
                 
             )
             results.append(response['choices'][0]['message']['content'])
-            print(results)
+            
             total_tokens_gen = len(encoding.encode(results[-1]))
             
         except Exception as e:
             print(f"Erreur lors de l'appel API : {e}")
             break  # Arrêter en cas d'erreur
-            
+    print(results)     
     return results,total_tokens, total_tokens_gen
 base_prompt =     """Act as an expert in international accounting. Help me match a foreign accounting account (account number + label) to a French PCG account from a predetermined list.
 The list contains either of two types of accounts:
@@ -176,13 +178,23 @@ def main():
             lines_bs = df[df['BS ou P&L'] == 'BS']
             lines_pl = df[df['BS ou P&L'] == 'P&L']
             del df
-            
-            lines_bs = lines_bs.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()
-            lines_pl = lines_pl.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()
-            total_bs = len(lines_bs)
-            total_pl = len(lines_pl)
+            if lines_bs.empty:
+                st.warning("No BS accounts found.")
+                total_bs = 0
+            else:
+                st.info(f"Found {len(lines_bs)} BS accounts.")
+                total_bs = len(lines_bs)
+                prompt_cost = estimate_prompt_cost(base_prompt, lines_bs, 'gpt-4o','BS', max_tokens=16000)
+
+                lines_bs = lines_bs.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()                
+            if lines_pl.empty:
+                st.warning("No P&L accounts found.")
+                total_pl = 0
+            else:
+                st.info(f"Found {len(lines_pl)} P&L accounts.")
+                lines_pl = lines_pl.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()
+                total_pl = len(lines_pl)
             output = (total_bs + total_pl)*120
-            prompt_cost = estimate_prompt_cost(base_prompt, lines_bs, 'gpt-4o','BS', max_tokens=16000)
             prompt_cost += estimate_prompt_cost(base_prompt, lines_pl, 'gpt-4o','P&L', max_tokens=16000)
             print(prompt_cost)
             print(output)
@@ -191,11 +203,21 @@ def main():
             gen_cost = gen_cost + prompt_cost
             st.info(f"Estimated cost: ${gen_cost:.2f}")
 
-            if st.button("GO"):                
-                gen_bs,prompt_tokens_bs,total_gen_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
-                gen_pl,prompt_tokens_pl,total_gen_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
-                df_bs = extract_from_list(gen_bs,'BS')
-                df_pl = extract_from_list(gen_pl,'P&L')
+            if st.button("GO"):   
+                if lines_bs:             
+                    
+                    gen_bs,prompt_tokens_bs,total_gen_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
+                    df_bs = extract_from_list(gen_bs,'BS')
+                else:
+                    prompt_tokens_bs = 0
+                    df_bs = pd.DataFrame()
+                if lines_pl:
+                    gen_pl,prompt_tokens_pl,total_gen_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
+
+                    df_pl = extract_from_list(gen_pl,'P&L')
+                else:  
+                    prompt_tokens_pl = 0 
+                    df_pl = pd.DataFrame()
                 df = pd.concat([df_bs, df_pl], ignore_index=True)
                 # Permettre à l'utilisateur de télécharger le fichier Excel traité
                 output = io.BytesIO()
