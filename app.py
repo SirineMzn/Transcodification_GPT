@@ -55,7 +55,7 @@ def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles =50,max_to
     
     return final_prompt, remaining_lines,prompt_tokens
 # Function to extract information from a list
-def extract_from_list(response_list,lines):
+def extract_from_list(response_list,acc_type):
     """
     Extrait les informations d'une liste contenant un seul élément avec plusieurs blocs formatés
     et les place dans un DataFrame.
@@ -70,30 +70,28 @@ def extract_from_list(response_list,lines):
     response_string = response_list[0]
     data = []
     index_list = 0
-    block_pattern = r"\*\*Label: (.*?)\*\*.*?\*\*COA Account: (.*?)\*\*.*?\*\*COA Label: (.*?)\*\*.*?\*\*Justification: (.*?)\*\*"
+    block_pattern = r"\*\*Account Number: (.*?)\*\*.*?\*\*Label: (.*?)\*\*.*?\*\*COA Account: (.*?)\*\*.*?\*\*COA Label: (.*?)\*\*.*?\*\*Justification: (.*?)\*\*"
     while index_list < len(response_list):
 
         matches = re.findall(block_pattern, response_string, re.DOTALL)
         
 
         for match in matches:
-            coa_account, coa_label, justification = match
-            data.append([coa_account.strip(), coa_label.strip(), justification.strip()])
+            numero,label,coa_account, coa_label, justification = match
+            data.append([numero.strip(),label.strip(),acc_type,coa_account.strip(), coa_label.strip(), justification.strip()])
             
         
         index_list += 1
-        response_string = response_list[index_list]
+        if index_list < len(response_list):
+            response_string = response_list[index_list]
     # Créer un DataFrame à partir des données extraites
-    extracted_df = pd.DataFrame(
+    df = pd.DataFrame(
         data,
-        columns=['Label', 'Compte COA', 'Libelle COA', 'Justification']
+        columns=['n° de compte','Libelle','BS ou P&L','Compte COA', 'Libelle COA', 'Justification']
     )
 
-    # Ajouter les données existantes (`lines`) dans le DataFrame final
-    lines_df = pd.DataFrame(lines, columns=['N° de compte', 'Libelle', 'BS ou P&L'])
-    final_df = pd.concat([lines_df, extracted_df], axis=1)
 
-    return final_df
+    return df
 def estimate_prompt_cost(base_prompt, lines, model,acc_type, max_tokens=16000):
     encoding = tiktoken.encoding_for_model(model)
     remaining_lines = lines
@@ -154,13 +152,14 @@ Account Number: {account_number}
 Label: {label}
 Type: {account_type}
 Provide an accurate match with an account from the predetermined list by giving only and exactly the following response format for each account:
+**Account Number: the account number**
 **Label: the account label**
     **COA Account: the corresponding PCG account number**
     **COA Label: the corresponding PCG account label**
 **Justification: explain in a maximum of 35 words why this account is the most appropriate.**
 --- 
 etc
-            """
+"""
 
     
 # Main
@@ -192,12 +191,8 @@ def main():
             gen_cost = gen_cost + prompt_cost
             st.info(f"Estimated cost: ${gen_cost:.2f}")
 
-            if st.button("GO"):
-                # Exemple 
-                response_list = ["**Label: E&O Reserve.**  **COA Account: 148.**  **COA Label: Other regulated provisions.**  **Justification: E&O Reserve typically covers errors and omissions, aligning with regulated provisions for potential liabilities or risks.****Label: Bank operations.**  **COA Account: 512.**  **COA Label: Bank.**  **Justification: Bank operations involve transactions related to bank accounts, matching the PCG account for bank balances.**"]
-                
+            if st.button("GO"):                
                 gen_bs,prompt_tokens_bs,total_gen_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
-
                 gen_pl,prompt_tokens_pl,total_gen_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
                 df_bs = extract_from_list(gen_bs,'BS')
                 df_pl = extract_from_list(gen_pl,'P&L')
