@@ -41,7 +41,6 @@ def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles =50,max_to
     prompt_tokens = len(encoding.encode(base_prompt))
     final_prompt = base_prompt
     remaining_lines = []
-    numbers = []
     count = 0
     for line in lines:
         line_tokens = len(encoding.encode(line + "\n---\n"))
@@ -52,12 +51,11 @@ def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles =50,max_to
             final_prompt += "\n" + line + "\n---\n"
             prompt_tokens += line_tokens
             count += 1
-        numbers.append(int(re.match(r"^\d+", line).group()) )
 
     
-    return final_prompt, remaining_lines,prompt_tokens,numbers
+    return final_prompt, remaining_lines,prompt_tokens
 # Function to extract information from a list
-def extract_from_list(response_list,numbers,account_type):
+def extract_from_list(response_list,lines):
     """
     Extrait les informations d'une liste contenant un seul élément avec plusieurs blocs formatés
     et les place dans un DataFrame.
@@ -65,33 +63,45 @@ def extract_from_list(response_list,numbers,account_type):
     :param response_list: Liste contenant une chaîne unique avec plusieurs blocs de données.
     :return: DataFrame avec les colonnes 'COA Account', 'COA Label', et 'Justification'.
     """
-    # Vérifier que la liste contient au moins un élément
-    if not response_list or len(response_list) != 1:
-        raise ValueError("La liste doit contenir un seul élément.")
+    print(response_list)
 
+    if not response_list :
+        raise ValueError("La liste est vide.")
     response_string = response_list[0]
     data = []
-    
+    index_list = 0
     block_pattern = r"\*\*Label: (.*?)\*\*.*?\*\*COA Account: (.*?)\*\*.*?\*\*COA Label: (.*?)\*\*.*?\*\*Justification: (.*?)\*\*"
-    
-    matches = re.findall(block_pattern, response_string, re.DOTALL)
-    index = 0
-    for match in matches:
-        number = numbers[index]
-        label, coa_account, coa_label, justification = match
-        data.append([number,label.strip(),account_type,coa_account.strip(), coa_label.strip(), justification.strip()])
-        index += 1
-    df = pd.DataFrame(data, columns=['N° de compte','Libelle','BS ou P&L','Compte COA','Libelle COA','Justification'])
-    return df
+    while index_list < len(response_list):
+
+        matches = re.findall(block_pattern, response_string, re.DOTALL)
+        
+
+        for match in matches:
+            coa_account, coa_label, justification = match
+            data.append([coa_account.strip(), coa_label.strip(), justification.strip()])
+            
+        
+        index_list += 1
+        response_string = response_list[index_list]
+    # Créer un DataFrame à partir des données extraites
+    extracted_df = pd.DataFrame(
+        data,
+        columns=['Label', 'Compte COA', 'Libelle COA', 'Justification']
+    )
+
+    # Ajouter les données existantes (`lines`) dans le DataFrame final
+    lines_df = pd.DataFrame(lines, columns=['N° de compte', 'Libelle', 'BS ou P&L'])
+    final_df = pd.concat([lines_df, extracted_df], axis=1)
+
+    return final_df
 def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_tokens=16000):
     encoding = tiktoken.encoding_for_model(model)
     remaining_lines = lines
     total_tokens = 0
     results = []
     while remaining_lines:
-        prompt, remaining_lines, prompt_tokens,numbers = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 50, max_tokens)
+        prompt, remaining_lines, prompt_tokens= prepare_prompt_with_limit(base_prompt, remaining_lines, model, 50, max_tokens)
         prompt += "\n"
-        
         # Ajouter les comptes COA correspondants
         if type_compte == 'BS':
             prompt += "Voici les comptes BS à associer :\n" + "\n".join(coa_bs)
@@ -109,13 +119,14 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_toke
                 
             )
             results.append(response['choices'][0]['message']['content'])
+            print(results)
             total_tokens_gen = len(encoding.encode(results[-1]))
             
         except Exception as e:
             print(f"Erreur lors de l'appel API : {e}")
             break  # Arrêter en cas d'erreur
             
-    return results,total_tokens, total_tokens_gen,numbers
+    return results,total_tokens, total_tokens_gen
 base_prompt =     """Act as an expert in international accounting. Help me match a foreign accounting account (account number + label) to a French PCG account from a predetermined list.
 The list contains either of two types of accounts:
 BS (Balance Sheet): accounts related to the balance sheet.
@@ -151,39 +162,45 @@ def main():
             
             lines_bs = lines_bs.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()
             lines_pl = lines_pl.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()
-            
-           
-            # Exemple 
-            response_list = ["**Label: E&O Reserve.**  **COA Account: 148.**  **COA Label: Other regulated provisions.**  **Justification: E&O Reserve typically covers errors and omissions, aligning with regulated provisions for potential liabilities or risks.****Label: Bank operations.**  **COA Account: 512.**  **COA Label: Bank.**  **Justification: Bank operations involve transactions related to bank accounts, matching the PCG account for bank balances.**"]
-            
-            gen_bs,prompt_tokens_bs,total_gen_bs,numbers_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
+            total_bs = len(lines_bs)
+            total_pl = len(lines_pl)
+            output = (total_bs + total_pl)*120
+            print(output)
+            cost_per_1000_tokens_for_gen = 0.01
+            gen_cost = (output / 1000) * cost_per_1000_tokens_for_gen
+            st.info(f"Estimated cost: ${gen_cost:.2f}")
 
-            gen_pl,prompt_tokens_pl,total_gen_pl,numbers_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
-            df_bs = extract_from_list(gen_bs,numbers_bs,'BS')
-            df_pl = extract_from_list(gen_pl,numbers_pl,'P&L')
-            df = pd.concat([df_bs, df_pl], ignore_index=True)
-            # Permettre à l'utilisateur de télécharger le fichier Excel traité
-            output = io.BytesIO()
-            df.to_excel(output, index=False, engine='xlsxwriter')
-            output.seek(0)
-                                # Permettre à l'utilisateur de télécharger le fichier Excel traité
-            st.success("Tap to download your file.")
-            st.download_button(
-                    label="Download processed file",
-                    data=output,
-                    file_name="output_traité.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            # Afficher le DataFrame
-            
-            cost_per_1000_tokens_for_prompt = 0.03
-            cost_per_1000_tokens_for_gen = 0.02
-            total_prompt = prompt_tokens_bs + prompt_tokens_pl
-            total_gen = total_gen_bs + total_gen_pl
-            total_cost_prompt = (total_prompt / 1000) * cost_per_1000_tokens_for_prompt
-            total_cost_gen = (total_gen / 1000) * cost_per_1000_tokens_for_gen
-            total_cost = total_cost_prompt + total_cost_gen
-            st.write(f"Total cost: ${total_cost:.2f}")
+            if st.button("GO"):
+                # Exemple 
+                response_list = ["**Label: E&O Reserve.**  **COA Account: 148.**  **COA Label: Other regulated provisions.**  **Justification: E&O Reserve typically covers errors and omissions, aligning with regulated provisions for potential liabilities or risks.****Label: Bank operations.**  **COA Account: 512.**  **COA Label: Bank.**  **Justification: Bank operations involve transactions related to bank accounts, matching the PCG account for bank balances.**"]
+                
+                gen_bs,prompt_tokens_bs,total_gen_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
+
+                gen_pl,prompt_tokens_pl,total_gen_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
+                df_bs = extract_from_list(gen_bs,'BS')
+                df_pl = extract_from_list(gen_pl,'P&L')
+                df = pd.concat([df_bs, df_pl], ignore_index=True)
+                # Permettre à l'utilisateur de télécharger le fichier Excel traité
+                output = io.BytesIO()
+                df.to_excel(output, index=False, engine='xlsxwriter')
+                output.seek(0)
+                                    # Permettre à l'utilisateur de télécharger le fichier Excel traité
+                st.success("Tap to download your file.")
+                st.download_button(
+                        label="Download processed file",
+                        data=output,
+                        file_name="output_traité.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                # Afficher le DataFrame
+                
+                cost_per_1000_tokens_for_prompt = 0.00250
+                total_prompt = prompt_tokens_bs + prompt_tokens_pl
+                total_gen = total_gen_bs + total_gen_pl
+                total_cost_prompt = (total_prompt / 1000) * cost_per_1000_tokens_for_prompt
+                total_cost_gen = (total_gen / 1000) * cost_per_1000_tokens_for_gen
+                total_cost = total_cost_prompt + total_cost_gen
+                st.write(f"Total cost: ${total_cost:.2f}")
             
         else:
             st.write("The file does not have columns : 'N° de compte', 'Libellé', 'BS ou P&L'.")
