@@ -6,8 +6,12 @@ import re
 import openai
 import io
 import time
+# Set the model
+model = "chatgpt-4o-latest"
+# Set the API key
 openai.api_key = st.secrets["API_key"]["openai_api_key"]
-base_dir = os.path.dirname(__file__)  # Le répertoire du script actuel
+# Load the COA file
+base_dir = os.path.dirname(__file__) 
 coa_file_path = os.path.join(base_dir, 'data', 'COA_simplifié_TC2.xlsx')
 coa = pd.read_excel(coa_file_path)
 # fonction to unify account type in one format
@@ -18,10 +22,7 @@ def clean_text(text):
     
     # convert to lowercase
     text_cleaned = text.lower()
-    text_cleaned = re.sub(r'[^a-zA-Z\s]', ' ', text_cleaned)
     
-    # Remove extra whitespaces
-    text_cleaned = re.sub(r'\s+', ' ', text_cleaned).strip()
     # remplacements by first letter of the word
     if text.lower().startswith('b'):
         text_cleaned= 'BS'
@@ -37,7 +38,7 @@ coa_bs = coa_bs.apply(lambda row: f"""{row['GL account']} - {row['Account Name']
 coa_pl = coa_pl.apply(lambda row: f"""{row['GL account']} - {row['Account Name']} - {row['BS / P&L']}""", axis=1).tolist()
 
 def estimate_prompt_cost(base_prompt, lines, model,acc_type, max_tokens=16000):
-    encoding = tiktoken.encoding_for_model(model)
+    encoding = tiktoken.get(model)
     remaining_lines = lines
     total_tokens = 0
     while remaining_lines:
@@ -55,37 +56,29 @@ def estimate_prompt_cost(base_prompt, lines, model,acc_type, max_tokens=16000):
     total_cost = (total_tokens / 1000) * cost_per_1000_tokens
     return total_cost
 # Function to prepare the prompt with a limit of tokens and 50 libelles per prompt
-def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles =50,max_tokens = 16000):
-    encoding = tiktoken.encoding_for_model(model)
-    
-    prompt_tokens = len(encoding.encode(base_prompt))
+def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles =50, max_tokens = 16000):
+
     final_prompt = base_prompt
     remaining_lines = []
     count = 0
     for line in lines:
-        line_tokens = len(encoding.encode(line + "\n---\n"))
         
-        if prompt_tokens + line_tokens > max_tokens or count > max_libelles:
+        if count > max_libelles:
             remaining_lines.append(line) 
         else:
             final_prompt += "\n" + line + "\n "
-            prompt_tokens += line_tokens
-            count += 1
-
-    
-    return final_prompt, remaining_lines,prompt_tokens
+            count += 1    
+    return final_prompt, remaining_lines
 
 def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_tokens=16000):
-    encoding = tiktoken.encoding_for_model(model)
     remaining_lines = lines
-    total_tokens = 0
     results = []
     extracted_data = []  # Liste pour stocker les données extraites
     block_pattern = r"\*\*Account Number: (.*?)\*\*.*?\*\*Label: (.*?)\*\*.*?\*\*COA Account: (.*?)\*\*.*?\*\*COA Label: (.*?)\*\*.*?\*\*Justification: (.*?)\*\*"
 
     while remaining_lines:
         # Préparer le prompt avec limite de tokens
-        prompt, remaining_lines, prompt_tokens = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 50, max_tokens)
+        prompt, remaining_lines= prepare_prompt_with_limit(base_prompt, remaining_lines, model, 50, max_tokens=16000)
         prompt += "\n"
         
         # Ajouter les comptes COA correspondants
@@ -101,7 +94,6 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_toke
 **Justification: explain in a maximum of 35 words why this account is the most appropriate.**
 --- 
 etc"""
-        total_tokens += len(encoding.encode(prompt))
         messages = [{"role": "user", "content": prompt}]
         try:
             response = openai.ChatCompletion.create(
@@ -113,13 +105,12 @@ etc"""
             
             # Ajouter la réponse brute à la liste des résultats
             results.append(response['choices'][0]['message']['content'])
-            
+            time.sleep(2)
             # Extraire les données correspondant au motif
             matches = re.findall(block_pattern, results[-1], re.DOTALL)
             for match in matches:
                 extracted_data.append(match)
             
-            total_tokens_gen = len(encoding.encode(results[-1]))
             
         except Exception as e:
             print(f"Erreur lors de l'appel API : {e}")
@@ -127,15 +118,15 @@ etc"""
 
     # Afficher le nombre de blocs extraits
     print(f"Total number of extracted data : {len(extracted_data)}")
-    print(f"extracted data: {extracted_data}")
+    #print(f"extracted data: {extracted_data}")
     # Retourner les résultats, les tokens totaux et les données extraites
-    return results, total_tokens, total_tokens_gen, extracted_data
+    return extracted_data
 base_prompt =     """Act as an expert in international accounting. Help me match a foreign accounting account (account number + label) to a French PCG account from a predetermined list.
 The list contains either of two types of accounts:
 BS (Balance Sheet): accounts related to the balance sheet.
 P&L (Profit & Loss): accounts related to the income statement.
 Analyze the following information:
-Account Number: {account_number} - Label: {label} - Type: {account_type}
+Account Number: {account_number},Label: {label}, Type: {account_type}
 """
 def extract_from_list(response_list,acc_type):
     """
@@ -165,10 +156,33 @@ def extract_from_list(response_list,acc_type):
 
     st.write(f"Finished processing {len(data)} of {acc_type} accounts")
     return df
-    
+
 # Main
 def main():
-    # Chemin du fichier
+    # Title 
+    st.title("TranscoGPT by Supervizor AI")
+    st.write("")
+    st.markdown("""
+    <div style="text-align: justify; font-size: 16px;">
+        <img src="https://upload.wikimedia.org/wikipedia/en/a/a4/Flag_of_the_United_States.svg" width="20" style="vertical-align: middle; margin-right: 10px;">
+        Welcome to <strong>TranscoGPT by Supervizor AI</strong>. This tool is designed to help you quickly and accurately map your foreign accounts to the Supervizor universal COA.
+        Simply upload your Excel file, review the estimated costs, and let our GPT-based engine provide recommended mappings along with short justifications.
+        Your data stays secure, and the entire process is protected by a password.
+    </div>
+""", unsafe_allow_html=True)
+    st.write("")
+    st.markdown("""
+    <div style="text-align: justify; font-size: 16px;">
+        <img src="https://upload.wikimedia.org/wikipedia/en/c/c3/Flag_of_France.svg" width="20" style="vertical-align: middle; margin-right: 10px;">
+        Bienvenue sur <strong>TranscoGPT by Supervizor AI</strong>. Cet outil vous aide à mapper rapidement et précisément vos comptes étrangers sur le Supervizor universal COA.
+        Il vous suffit d’importer votre fichier Excel, de vérifier l’estimation des coûts, et de laisser notre moteur à base de GPT vous fournir les mappings recommandés,
+        accompagnés de brèves justifications. Vos données restent sécurisées, et l’ensemble du processus est protégé par un mot de passe.
+    </div>
+""", unsafe_allow_html=True)
+    st.write("")
+
+
+    # file path
     file_uploaded = st.file_uploader("Please upload an Excel file only.", type=[ "xlsx"])
     if file_uploaded is not None:
         df = pd.read_excel(file_uploaded)
@@ -183,45 +197,32 @@ def main():
             if lines_bs.empty:
                 st.warning("No BS accounts found.")
                 total_bs = 0
-                prompt_cost = 0
             else:
                 st.info(f"Found {len(lines_bs)} BS accounts.")
                 total_bs = len(lines_bs)
                 lines_bs = lines_bs.apply(lambda row: f"""{row['N° de compte']},{row['Libellé']},{row['BS ou P&L']}""", axis=1).tolist()                
 
-                prompt_cost = estimate_prompt_cost(base_prompt, lines_bs, 'gpt-4o','BS', max_tokens=16000)
 
             if lines_pl.empty:
                 st.warning("No P&L accounts found.")
                 total_pl = 0
-                prompt_cost += 0
             else:
                 st.info(f"Found {len(lines_pl)} P&L accounts.")
                 lines_pl = lines_pl.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()
                 total_pl = len(lines_pl)
-                prompt_cost += estimate_prompt_cost(base_prompt, lines_pl, 'gpt-4o','P&L', max_tokens=16000)
-            output = (total_bs + total_pl)*120
-            print(prompt_cost)
-            print(output)
-            cost_per_1000_tokens_for_gen = 0.01
-            gen_cost = (output / 1000) * cost_per_1000_tokens_for_gen
-            gen_cost = gen_cost + prompt_cost
-            st.info(f"Estimated cost: ${gen_cost:.2f}")
-
+            
             if st.button("GO"):   
                 if lines_bs:             
-                    gen_bs,prompt_tokens_bs,total_gen_bs,extracted_data_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
+                    extracted_data_bs=process_with_gpt_in_batches(base_prompt, lines_bs, model,'BS', 16000)
                     
                     df_bs = extract_from_list(extracted_data_bs,'BS')
                 else:
-                    prompt_tokens_bs = 0
                     df_bs = pd.DataFrame()
                 if lines_pl:
-                    gen_pl,prompt_tokens_pl,total_gen_pl,extracted_data_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
+                    extracted_data_pl=process_with_gpt_in_batches(base_prompt, lines_pl, model,'P&L', 16000)
 
                     df_pl = extract_from_list(extracted_data_pl,'P&L')
                 else:  
-                    prompt_tokens_pl = 0 
                     df_pl = pd.DataFrame()
                 df = pd.concat([df_bs, df_pl], ignore_index=True)
                 # Permettre à l'utilisateur de télécharger le fichier Excel traité
@@ -236,15 +237,7 @@ def main():
                         file_name="output_traité.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
-                # Afficher le DataFrame
                 
-                cost_per_1000_tokens_for_prompt = 0.00250
-                total_prompt = prompt_tokens_bs + prompt_tokens_pl
-                total_gen = total_gen_bs + total_gen_pl
-                total_cost_prompt = (total_prompt / 1000) * cost_per_1000_tokens_for_prompt
-                total_cost_gen = (total_gen / 1000) * cost_per_1000_tokens_for_gen
-                total_cost = total_cost_prompt + total_cost_gen
-                st.write(f"Total cost: ${total_cost:.2f}")
             
         else:
             st.write("The file does not have columns : 'N° de compte', 'Libellé', 'BS ou P&L'.")
