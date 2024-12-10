@@ -67,7 +67,7 @@ def extract_from_list(response_list,acc_type):
     
     if not response_list :
         raise ValueError("La liste est vide.")
-    st.wrtie(f"started processing {acc_type} accounts")
+    st.write(f"started processing {acc_type} accounts")
     response_string = response_list[0]
     data = []
     index_list = 0
