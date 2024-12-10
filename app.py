@@ -181,21 +181,25 @@ def main():
             if lines_bs.empty:
                 st.warning("No BS accounts found.")
                 total_bs = 0
+                prompt_cost = 0
             else:
                 st.info(f"Found {len(lines_bs)} BS accounts.")
                 total_bs = len(lines_bs)
+                lines_bs = lines_bs.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()                
+
                 prompt_cost = estimate_prompt_cost(base_prompt, lines_bs, 'gpt-4o','BS', max_tokens=16000)
 
-                lines_bs = lines_bs.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()                
             if lines_pl.empty:
                 st.warning("No P&L accounts found.")
                 total_pl = 0
+                prompt_cost += 0
             else:
                 st.info(f"Found {len(lines_pl)} P&L accounts.")
                 lines_pl = lines_pl.apply(lambda row: f"""{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}""", axis=1).tolist()
                 total_pl = len(lines_pl)
+                prompt_cost += estimate_prompt_cost(base_prompt, lines_pl, 'gpt-4o','P&L', max_tokens=16000)
+
             output = (total_bs + total_pl)*120
-            prompt_cost += estimate_prompt_cost(base_prompt, lines_pl, 'gpt-4o','P&L', max_tokens=16000)
             print(prompt_cost)
             print(output)
             cost_per_1000_tokens_for_gen = 0.01
