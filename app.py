@@ -80,11 +80,12 @@ def extract_from_list(response_list,acc_type):
         for match in matches:
             numero,label,coa_account, coa_label, justification = match
             data.append([numero.strip(),label.strip(),acc_type,coa_account.strip(), coa_label.strip(), justification.strip()])
-            
         
         index_list += 1
         if index_list < len(response_list):
             response_string = response_list[index_list]
+    st.write(data)
+
     # Créer un DataFrame à partir des données extraites
     df = pd.DataFrame(
         data,
@@ -143,7 +144,7 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_toke
         except Exception as e:
             print(f"Erreur lors de l'appel API : {e}")
             break  # Arrêter en cas d'erreur
-    print(results)     
+        
     return results,total_tokens, total_tokens_gen
 base_prompt =     """Act as an expert in international accounting. Help me match a foreign accounting account (account number + label) to a French PCG account from a predetermined list.
 The list contains either of two types of accounts:
@@ -209,13 +210,12 @@ def main():
 
             if st.button("GO"):   
                 if lines_bs:             
-                    
                     gen_bs,prompt_tokens_bs,total_gen_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
                     df_bs = extract_from_list(gen_bs,'BS')
                 else:
                     prompt_tokens_bs = 0
                     df_bs = pd.DataFrame()
-                if lines_pl:
+                """if lines_pl:
                     gen_pl,prompt_tokens_pl,total_gen_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
 
                     df_pl = extract_from_list(gen_pl,'P&L')
@@ -243,7 +243,7 @@ def main():
                 total_cost_prompt = (total_prompt / 1000) * cost_per_1000_tokens_for_prompt
                 total_cost_gen = (total_gen / 1000) * cost_per_1000_tokens_for_gen
                 total_cost = total_cost_prompt + total_cost_gen
-                st.write(f"Total cost: ${total_cost:.2f}")
+                st.write(f"Total cost: ${total_cost:.2f}")"""
             
         else:
             st.write("The file does not have columns : 'N° de compte', 'Libellé', 'BS ou P&L'.")
