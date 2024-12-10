@@ -210,16 +210,16 @@ def main():
 
             if st.button("GO"):   
                 if lines_bs:             
-                    gen_bs,prompt_tokens_bs,total_gen_bs,extracted_data=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
+                    gen_bs,prompt_tokens_bs,total_gen_bs,extracted_data_bs=process_with_gpt_in_batches(base_prompt, lines_bs, 'gpt-4o','BS', 16000)
                     
-                    df_bs = extract_from_list(gen_bs,'BS')
+                    df_bs = extract_from_list(extracted_data_bs,'BS')
                 else:
                     prompt_tokens_bs = 0
                     df_bs = pd.DataFrame()
                 if lines_pl:
-                    gen_pl,prompt_tokens_pl,total_gen_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
+                    gen_pl,prompt_tokens_pl,total_gen_pl,extracted_data_pl=process_with_gpt_in_batches(base_prompt, lines_pl, 'gpt-4o','P&L', 16000)
 
-                    df_pl = extract_from_list(gen_pl,'P&L')
+                    df_pl = extract_from_list(extracted_data_pl,'P&L')
                 else:  
                     prompt_tokens_pl = 0 
                     df_pl = pd.DataFrame()
