@@ -105,7 +105,7 @@ etc"""
             
             # Ajouter la réponse brute à la liste des résultats
             results.append(response['choices'][0]['message']['content'])
-            time.sleep(2)
+            time.sleep(1)
             # Extraire les données correspondant au motif
             matches = re.findall(block_pattern, results[-1], re.DOTALL)
             for match in matches:
