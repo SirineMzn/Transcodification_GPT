@@ -145,12 +145,12 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language,
     results = []
     extracted_data = []
     block_pattern = (
-        r"(?:\*\*|)Account Number[:\s*]*(.+?)(?:\*\*|\n|$)"  
-        r"(?:\*\*|)Label[:\s*]*(.+?)(?:\*\*|\n|$)"           
-        r"(?:\*\*|)COA Account[:\s*]*(.+?)(?:\*\*|\n|$)"    
-        r"(?:\*\*|)COA Label[:\s*]*(.+?)(?:\*\*|\n|$)"      
-        r"(?:\*\*|)Justification[:\s*]*(.+?)(?:\*\*|\n|$)"   
-    )
+    r"\*\*Account Number[:\s*]*(.+?)(?=\*\*|\n|$)"
+    r"\*\*Label[:\s*]*(.+?)(?=\*\*|\n|$)"
+    r"\*\*COA Account[:\s*]*(.+?)(?=\*\*|\n|$)"
+    r"\*\*COA Label[:\s*]*(.+?)(?=\*\*|\n|$)"
+    r"\*\*Justification[:\s*]*(.+?)(?=\*\*|\n|$)"
+)
 
     # Loop through all remaining lines, preparing and sending prompts in manageable batches
     while remaining_lines:
@@ -293,7 +293,7 @@ def main():
         bs_pl_column = df.columns[2]
         df[bs_pl_column] = df[bs_pl_column].apply(clean_text)
         lines_bs = df[df[bs_pl_column] == 'BS']
-        lines_pl = 641
+        lines_pl = df[df[bs_pl_column] == 'P&L']
         del df
 
         if lines_bs.empty:
