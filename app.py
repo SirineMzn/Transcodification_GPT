@@ -145,11 +145,11 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language,
     results = []
     extracted_data = []
     block_pattern = (
-    r"\*\*Account Number[:\s*]*(.+?)(?=\*\*|\n|$)"
-    r"\*\*Label[:\s*]*(.+?)(?=\*\*|\n|$)"
-    r"\*\*COA Account[:\s*]*(.+?)(?=\*\*|\n|$)"
-    r"\*\*COA Label[:\s*]*(.+?)(?=\*\*|\n|$)"
-    r"\*\*Justification[:\s*]*(.+?)(?=\*\*|\n|$)"
+    r"Account Number[:\s*]*(.+?)(?=\n|$)"
+    r"Label[:\s*]*(.+?)(?=\n|$)"
+    r"COA Account[:\s*]*(.+?)(?=\n|$)"
+    r"COA Label[:\s*]*(.+?)(?=\n|$)"
+    r"Justification[:\s*]*(.+?)(?=\n|$)"
 )
 
     # Loop through all remaining lines, preparing and sending prompts in manageable batches
@@ -165,10 +165,10 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language,
 
         # Provide formatting instructions for the GPT response
         prompt += """Provide an accurate match with an account from the predetermined list by giving only and exactly the following response format for each account:
-**Account Number: the account number**
-**Label: the account label**
-    **COA Account: the corresponding PCG account number**
-    **COA Label: the corresponding PCG account label**
+Account Number: the account number
+Label: the account label
+    COA Account: the corresponding PCG account number
+    COA Label: the corresponding PCG account label
 **Justification: explain in a maximum of 35 words why this account is the most appropriate.**
 --- 
 """
