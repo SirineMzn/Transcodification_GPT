@@ -120,7 +120,7 @@ def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles=10, max_to
     prompt_tokens = 0  
     return final_prompt, remaining_lines, prompt_tokens
 
-def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language):
+def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language, max_tokens=16000):
     """
     Process a list of accounts in batches through the GPT model.
     
@@ -180,6 +180,7 @@ etc"""
                 model=model,
                 messages=messages,
                 temperature=0.5,
+                max_completion_tokens = max_tokens
                 
             )
 
@@ -200,12 +201,13 @@ etc"""
     return extracted_data
 
 # Base prompt template to guide GPT toward mapping a foreign account to French PCG accounts
-base_prompt = """Act as an expert in international accounting. Help me match a foreign accounting account (account number + label) to a French PCG account from a predetermined list.
+base_prompt = """Act as an expert in international accounting. Your objective is to establish a correspondence between each provided foreign accounting account (account number, label, and type) and an appropriate French PCG (Plan Comptable Général) account, based on a predefined list of accounts.
 The list contains either of two types of accounts:
 BS (Balance Sheet): accounts related to the balance sheet.
 P&L (Profit & Loss): accounts related to the income statement.
-Analyze the following information:
+For each foreign account provided, carefully analyze the following information:
 Account Number: {account_number},Label: {label}, Type: {account_type}
+Then, identify the corresponding French PCG account. Make sure to consider and fully process every account provided, without omitting any.
 """
 
 def extract_from_list(response_list, acc_type):
@@ -286,76 +288,73 @@ def main():
     file_uploaded = st.file_uploader("Please upload an Excel file only.", type=["xlsx"])
     if file_uploaded is not None:
         df = pd.read_excel(file_uploaded)
-        df['BS ou P&L'] = df['BS ou P&L'].apply(clean_text)
+        numero_acc_column = df.columns[0]
+        label_column = df.columns[1]
+        bs_pl_column = df.columns[2]
+        df[bs_pl_column] = df[bs_pl_column].apply(clean_text)
+        lines_bs = df[df[bs_pl_column] == 'BS']
+        lines_pl = df[df[bs_pl_column] == 'P&L']
+        del df
 
-        # Check if all required columns are present
-        required_columns = ['N° de compte', 'Libellé', 'BS ou P&L']
-        if all(column in df.columns for column in required_columns):
-            lines_bs = df[df['BS ou P&L'] == 'BS']
-            lines_pl = df[df['BS ou P&L'] == 'P&L']
-            del df
-
-            if lines_bs.empty:
-                st.warning("No BS accounts found.")
-                total_bs = 0
-            else:
-                st.info(f"Found {len(lines_bs)} BS accounts.")
-                total_bs = len(lines_bs)
+        if lines_bs.empty:
+            st.warning("No BS accounts found.")
+            total_bs = 0
+        else:
+            st.info(f"Found {len(lines_bs)} BS accounts.")
+            total_bs = len(lines_bs)
                 # Prepare BS lines for GPT processing
-                lines_bs = lines_bs.apply(lambda row: f"{row['N° de compte']},{row['Libellé']},{row['BS ou P&L']}", axis=1).tolist()
+            lines_bs = lines_bs.apply(lambda row: f"{row[numero_acc_column]},{row[label_column]},{row[bs_pl_column]}", axis=1).tolist()
 
-            if lines_pl.empty:
-                st.warning("No P&L accounts found.")
-                total_pl = 0
-            else:
-                st.info(f"Found {len(lines_pl)} P&L accounts.")
-                total_pl = len(lines_pl)
+        if lines_pl.empty:
+            st.warning("No P&L accounts found.")
+            total_pl = 0
+        else:
+            st.info(f"Found {len(lines_pl)} P&L accounts.")
+            total_pl = len(lines_pl)
                 # Prepare P&L lines for GPT processing
-                lines_pl = lines_pl.apply(lambda row: f"{row['N° de compte']} - {row['Libellé']} - {row['BS ou P&L']}", axis=1).tolist()
+            lines_pl = lines_pl.apply(lambda row: f"{row[numero_acc_column]} - {row[label_column]} - {row[bs_pl_column]}", axis=1).tolist()
                 # displaying language options : "French" and "English"
-            language = st.selectbox(
+        language = st.selectbox(
                     "Choose a language:", 
-                    ("French", "English"),  # Options
+                    ( "English"),  # Options
                     index=0  # Default value is french
                 )
 
             # Once user is ready, process the data
-            if st.button("GO"):
+        if st.button("GO"):
 
                 # Afficher la sélection
-                st.write(f"You selected: {language}")
+            st.write(f"You selected: {language}")
 
-                if lines_bs:
-                    extracted_data_bs = process_with_gpt_in_batches(base_prompt, lines_bs, model, 'BS',language)
-                    df_bs = extract_from_list(extracted_data_bs, 'BS')
-                else:
-                    df_bs = pd.DataFrame()
+            if lines_bs:
+                extracted_data_bs = process_with_gpt_in_batches(base_prompt, lines_bs, model, 'BS',language,max_tokens=16000)
+                df_bs = extract_from_list(extracted_data_bs, 'BS')
+            else:
+                df_bs = pd.DataFrame()
 
-                if lines_pl:
-                    extracted_data_pl = process_with_gpt_in_batches(base_prompt, lines_pl, model, 'P&L',language)
-                    df_pl = extract_from_list(extracted_data_pl, 'P&L')
-                else:
-                    df_pl = pd.DataFrame()
-                total_file = total_bs + total_pl
+            if lines_pl:
+                extracted_data_pl = process_with_gpt_in_batches(base_prompt, lines_pl, model, 'P&L',language,max_tokens=16000)
+                df_pl = extract_from_list(extracted_data_pl, 'P&L')
+            else:
+                df_pl = pd.DataFrame()
+            total_file = total_bs + total_pl
                 # Combine results and prepare for download
-                df = pd.concat([df_bs, df_pl], ignore_index=True)
-                df_size = len(df)
-                st.write(f"Finished processing {df_size/total_file} accounts.")
+            df = pd.concat([df_bs, df_pl], ignore_index=True)
+            df_size = len(df)
+            st.info(f"Finished processing {df_size}/{total_file} accounts.")
 
-                output = io.BytesIO()
-                df.to_excel(output, index=False, engine='xlsxwriter')
-                output.seek(0)
+            output = io.BytesIO()
+            df.to_excel(output, index=False, engine='xlsxwriter')
+            output.seek(0)
 
-                st.success("Tap to download your processed file.")
-                st.download_button(
+            st.success("Tap to download your processed file.")
+            st.download_button(
                     label="Download processed file",
                     data=output,
                     file_name="output_traduit.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 
-        else:
-            st.write("The file is missing one or more required columns: 'N° de compte', 'Libellé', 'BS ou P&L'.")
-
+      
 if __name__ == "__main__":
     main()
