@@ -145,12 +145,14 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language,
     results = []
     extracted_data = []
     block_pattern = (
-    r"Account Number[:\s*]*(.+?)(?=\n|$)"
-    r"Label[:\s*]*(.+?)(?=\n|$)"
-    r"COA Account[:\s*]*(.+?)(?=\n|$)"
-    r"COA Label[:\s*]*(.+?)(?=\n|$)"
-    r"Justification[:\s*]*(.+?)(?=\n|$)"
+
+    r"Account Number:\s*(.+?)\s*?\n"
+    r"Label:\s*(.+?)\s*?\n"
+    r"COA Account:\s*(.+?)\s*?\n"
+    r"COA Label:\s*(.+?)\s*?\n"
+    r"Justification:\s*(.+?)(?=\n|$)"
 )
+
 
     # Loop through all remaining lines, preparing and sending prompts in manageable batches
     while remaining_lines:
@@ -169,7 +171,7 @@ Account Number: the account number
 Label: the account label
     COA Account: the corresponding PCG account number
     COA Label: the corresponding PCG account label
-**Justification: explain in a maximum of 35 words why this account is the most appropriate.**
+Justification: explain in a maximum of 35 words why this account is the most appropriate.
 --- 
 """
         prompt += f"respond in {language}"
