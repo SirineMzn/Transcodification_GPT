@@ -299,6 +299,7 @@ def main():
         if lines_bs.empty:
             st.warning("No BS accounts found.")
             total_bs = 0
+            lines_bs = []
         else:
             st.info(f"Found {len(lines_bs)} BS accounts.")
             total_bs = len(lines_bs)
@@ -308,6 +309,7 @@ def main():
         if lines_pl.empty:
             st.warning("No P&L accounts found.")
             total_pl = 0
+            lines_pl = []
         else:
             st.info(f"Found {len(lines_pl)} P&L accounts.")
             total_pl = len(lines_pl)
@@ -326,13 +328,13 @@ def main():
                 # Afficher la sélection
             st.write(f"You selected: {language}")
 
-            if not lines_bs.empty:
+            if  lines_bs:
                 extracted_data_bs = process_with_gpt_in_batches(base_prompt, lines_bs, model, 'BS',language,max_tokens=16000)
                 df_bs = extract_from_list(extracted_data_bs, 'BS')
             else:
                 df_bs = pd.DataFrame()
 
-            if not lines_pl.empty:
+            if lines_pl:
                 extracted_data_pl = process_with_gpt_in_batches(base_prompt, lines_pl, model, 'P&L',language,max_tokens=16000)
                 df_pl = extract_from_list(extracted_data_pl, 'P&L')
             else:
