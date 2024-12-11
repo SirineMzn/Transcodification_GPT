@@ -73,7 +73,7 @@ def estimate_prompt_cost(base_prompt, lines, model, acc_type, max_tokens=16000):
     remaining_lines = lines
     total_tokens = 0
     while remaining_lines:
-        prompt, remaining_lines, prompt_tokens = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 10, max_tokens)
+        prompt, remaining_lines, prompt_tokens = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 50, max_tokens)
         prompt += "\n"
         # Add relevant COA accounts list depending on the account type
         if acc_type == 'BS':
@@ -90,7 +90,7 @@ def estimate_prompt_cost(base_prompt, lines, model, acc_type, max_tokens=16000):
     total_cost = (total_tokens / 1000) * cost_per_1000_tokens
     return total_cost
 
-def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles=10, max_tokens=16000):
+def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles=50, max_tokens=16000):
     """
     Build a prompt that includes a limited number of account lines to avoid exceeding token limits.
     - base_prompt: The base prompt text.
@@ -154,7 +154,7 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language,
 
     # Loop through all remaining lines, preparing and sending prompts in manageable batches
     while remaining_lines:
-        prompt, remaining_lines, _ = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 10, max_tokens=16000)
+        prompt, remaining_lines, _ = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 50, max_tokens=16000)
         prompt += "\n"
 
         # Append the appropriate COA account list to the prompt based on the account type
@@ -171,7 +171,7 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language,
     **COA Label: the corresponding PCG account label**
 **Justification: explain in a maximum of 35 words why this account is the most appropriate.**
 --- 
-etc"""
+"""
         prompt += f"respond in {language}"
         messages = [{"role": "user", "content": prompt}]
         try:
