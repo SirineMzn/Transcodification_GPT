@@ -293,7 +293,7 @@ def main():
         bs_pl_column = df.columns[2]
         df[bs_pl_column] = df[bs_pl_column].apply(clean_text)
         lines_bs = df[df[bs_pl_column] == 'BS']
-        lines_pl = df[df[bs_pl_column] == 'P&L']
+        lines_pl = 641
         del df
 
         if lines_bs.empty:
@@ -326,13 +326,13 @@ def main():
                 # Afficher la sélection
             st.write(f"You selected: {language}")
 
-            if lines_bs:
+            if not lines_bs.empty:
                 extracted_data_bs = process_with_gpt_in_batches(base_prompt, lines_bs, model, 'BS',language,max_tokens=16000)
                 df_bs = extract_from_list(extracted_data_bs, 'BS')
             else:
                 df_bs = pd.DataFrame()
 
-            if lines_pl:
+            if not lines_pl.empty:
                 extracted_data_pl = process_with_gpt_in_batches(base_prompt, lines_pl, model, 'P&L',language,max_tokens=16000)
                 df_pl = extract_from_list(extracted_data_pl, 'P&L')
             else:
