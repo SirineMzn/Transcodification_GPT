@@ -144,14 +144,15 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language,
     remaining_lines = lines
     results = []
     extracted_data = []
+    
     block_pattern = (
-
-    r"Account Number:\s*(.+?)\s*?\n"
-    r"Label:\s*(.+?)\s*?\n"
-    r"COA Account:\s*(.+?)\s*?\n"
-    r"COA Label:\s*(.+?)\s*?\n"
-    r"Justification:\s*(.+?)(?=\n|$)"
+    r"(?:[\*\-\s]*)Account Number:\s*(.*?)\r?\n"  # Account Number + valeur
+    r"(?:[\*\-\s]*)Label:\s*(.*?)\r?\n"           # Label + valeur
+    r"(?:[\*\-\s]*)COA Account:\s*(.*?)\r?\n"     # COA Account + valeur
+    r"(?:[\*\-\s]*)COA Label:\s*(.*?)\r?\n"       # COA Label + valeur
+    r"(?:[\*\-\s]*)Justification:\s*(.*?)(?=\r?\n|$)"  # Justification jusqu'à la fin de ligne ou fin du texte
 )
+
 
 
     # Loop through all remaining lines, preparing and sending prompts in manageable batches
@@ -243,7 +244,14 @@ def extract_from_list(response_list, acc_type):
 
     st.write(f"Finished processing {len(data)} {acc_type} accounts")
     return df
-
+def remove_double_asterisks(df):
+    # Pour chaque colonne du DataFrame
+    for col in df.columns:
+        # Vérifier si la colonne contient des données de type object (généralement des chaînes)
+        if df[col].dtype == 'object':
+            # Remplacer toutes les occurrences de '**' par '' (une chaîne vide)
+            df[col] = df[col].str.replace('**', '', regex=False)
+    return df
 def main():
     """
     Main Streamlit application logic:
@@ -346,9 +354,11 @@ def main():
             df = pd.concat([df_bs, df_pl], ignore_index=True)
             df_size = len(df)
             st.info(f"Finished processing {df_size}/{total_file} accounts.")
-
+            df = remove_double_asterisks(df)
             output = io.BytesIO()
             df.to_excel(output, index=False, engine='xlsxwriter')
+            
+
             output.seek(0)
 
             st.success("Tap to download your processed file.")
