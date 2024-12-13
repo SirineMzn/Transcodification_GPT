@@ -72,7 +72,7 @@ def estimate_prompt_cost(base_prompt, lines, model, acc_type, max_tokens=16000):
     2. Calculates the total tokens for all these prompt blocks.
     3. Estimates the cost based on a predefined rate per 1000 tokens.
     """
-    encoding = tiktoken.get(model)
+    encoding = tiktoken.encoding_for_model(model)
     remaining_lines = lines
     total_tokens = 0
     while remaining_lines:
@@ -321,34 +321,43 @@ def main():
     if file_uploaded is not None:
 
         df = pd.read_excel(file_uploaded)
+        df = df.drop_duplicates()
         numero_acc_column = df.columns[0]
         label_column = df.columns[1]
         bs_pl_column = df.columns[2]
         df[bs_pl_column] = df[bs_pl_column].apply(clean_text)
         lines_bs = df[df[bs_pl_column] == 'BS']
-        lines_bs = lines_bs.drop_duplicates()
         lines_pl = df[df[bs_pl_column] == 'P&L']
         del df
 
         if lines_bs.empty:
             st.warning("No Balance Sheet accounts found.")
             total_bs = 0
+            prompt_cost = 0
             lines_bs = []
         else:
             st.info(f"Found {len(lines_bs)} Balance Sheet accounts.")
             total_bs = len(lines_bs)
                 # Prepare BS lines for GPT processing
             lines_bs = lines_bs.apply(lambda row: f"{row[numero_acc_column]},{row[label_column]},{row[bs_pl_column]}", axis=1).tolist()
-            print(f"the lines_bs are {lines_bs}")
+            prompt_cost = estimate_prompt_cost(base_prompt, lines_bs, model, 'BS', max_tokens=16000)
         if lines_pl.empty:
             st.warning("No Profit and Loss accounts found.")
             total_pl = 0
             lines_pl = []
+            prompt_cost += 0
         else:
             st.info(f"Found {len(lines_pl)} Profit and Loss accounts.")
             total_pl = len(lines_pl)
                 # Prepare P&L lines for GPT processing
             lines_pl = lines_pl.apply(lambda row: f"{row[numero_acc_column]},{row[label_column]},{row[bs_pl_column]}", axis=1).tolist()
+            prompt_cost += estimate_prompt_cost(base_prompt, lines_pl, 'gpt-4o','P&L', max_tokens=16000)
+        output = (total_bs + total_pl)*120
+        cost_per_1000_tokens_for_gen = 0.01
+        gen_cost = (output / 1000) * cost_per_1000_tokens_for_gen
+        gen_cost = gen_cost + prompt_cost
+        st.info(f"Estimated cost: ${gen_cost:.2f}")
+        
         if st.button("GO"):
 
 
