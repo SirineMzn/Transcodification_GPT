@@ -8,5 +8,3 @@ bcrypt
 tiktoken
 openpyxl
 xlsxwriter
-pydantic
-json
