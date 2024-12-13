@@ -6,9 +6,12 @@ import re
 import openai
 import io
 import time
+import json
+
+
 
 # Set the OpenAI model name (ensure the model is supported by your OpenAI subscription)
-model = "chatgpt-4o-latest"
+model = "gpt-4o-2024-11-20"
 
 # Retrieve the OpenAI API key from Streamlit secrets
 openai.api_key = st.secrets["API_key"]["openai_api_key"]
@@ -120,87 +123,79 @@ def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles=25, max_to
     prompt_tokens = 0  
     return final_prompt, remaining_lines, prompt_tokens
 
-def process_with_gpt_in_batches(base_prompt, lines, model, type_compte,language, max_tokens=16000):
-    """
-    Process a list of accounts in batches through the GPT model.
-    
-    Steps:
-    1. Iteratively construct prompts, each containing up to a limited number of accounts.
-    2. Add the appropriate COA account list (BS or P&L) to the prompt.
-    3. Call the OpenAI API for each prompt and gather responses.
-    4. Extract structured data (account number, label, matched COA account/label, and justification) using regex patterns.
-    
-    Parameters:
-    - base_prompt (str): The prompt template used to guide the model.
-    - lines (list[str]): The list of lines, each containing an account number, label, and type.
-    - model (str): The GPT model name.
-    - type_compte (str): 'BS' or 'P&L', indicating which type of accounts we are dealing with.
-    - max_tokens (int): The maximum tokens allowed in a single response (to prevent overuse of tokens).
-    
-    Returns:
-    A list of tuples, each containing extracted fields: 
-    (account_number, label, matched_coa_account, matched_coa_label, justification).
-    """
+def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_tokens=16000):
     remaining_lines = lines
-    results = []
     extracted_data = []
     
-    block_pattern = (
-    r"(?:[\*\-\s]*)Account Number:\s*(.*?)\r?\n"  # Account Number + valeur
-    r"(?:[\*\-\s]*)Label:\s*(.*?)\r?\n"           # Label + valeur
-    r"(?:[\*\-\s]*)COA Account:\s*(.*?)\r?\n"     # COA Account + valeur
-    r"(?:[\*\-\s]*)COA Label:\s*(.*?)\r?\n"       # COA Label + valeur
-    r"(?:[\*\-\s]*)Justification:\s*(.*?)(?=\r?\n|$)"  # Justification jusqu'à la fin de ligne ou fin du texte
-)
-
-
-
-    # Loop through all remaining lines, preparing and sending prompts in manageable batches
     while remaining_lines:
-        prompt, remaining_lines, _ = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 25, max_tokens=16000)
+        prompt, remaining_lines, _ = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 25, max_tokens)
         prompt += "\n"
 
-        # Append the appropriate COA account list to the prompt based on the account type
         if type_compte == 'BS':
             prompt += "Existing accounts in PCG :\n" + "\n".join(coa_bs)
         elif type_compte == 'P&L':
             prompt += "Existing accounts in PCG :\n" + "\n".join(coa_pl)
+        prompt += "\n"
+        prompt += "Please provide the corresponding COA account for all the americain accounts above\n"
+        messages = [{"role": "system", "content": "You are an assistant that provides structured JSON responses based on the schema."},
+                    {"role": "user", "content": prompt}]
+        response_format = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "account_matching_response", 
+        "schema": {
+            "type": "object",  
+            "properties": {
+                "final_answer": {  
+                    "type": "array", 
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "account_number": {"type": "string"},
+                            "label": {"type": "string"},
+                            "coa_account": {"type": "string"},
+                            "coa_label": {"type": "string"},
+                            "justification": {"type": "string"}
+                        },
+                        "required": ["account_number", "label", "coa_account", "coa_label", "justification"],
+                        "additionalProperties": False  
+                    }
+                }
+            },
+            "required": ["final_answer"],  # Seul "final_answer" est obligatoire
+            "additionalProperties": False  # Aucun autre champ non spécifié n'est autorisé
+        },
+        "strict": True  # Active un contrôle strict du schéma
+    }
+}
 
-        # Provide formatting instructions for the GPT response
-        prompt += """Provide an accurate match with an account from the predetermined list by giving only and exactly the following response format for each account:
-Account Number: the account number
-Label: the account label
-    COA Account: the corresponding PCG account number
-    COA Label: the corresponding PCG account label
-Justification: explain in a maximum of 35 words why this account is the most appropriate.
---- 
-"""
-        prompt += f"respond in {language}"
-        messages = [{"role": "user", "content": prompt}]
+
         try:
-            # Call the OpenAI ChatCompletion endpoint
             response = openai.ChatCompletion.create(
                 model=model,
                 messages=messages,
+                response_format = response_format,
                 temperature=0.5,
-                max_completion_tokens = max_tokens
-                
+                max_tokens=max_tokens
             )
+            parsed_response = json.loads(response['choices'][0]['message']['content'])
 
-            # Append the raw response to results for potential debugging
-            results.append(response['choices'][0]['message']['content'])
-            time.sleep(1)  # Respect rate limits by adding a small delay
-            print(results[-1])
-            # Use regex to extract structured data from the response
-            matches = re.findall(block_pattern, results[-1], re.DOTALL)
-            for match in matches:
-                extracted_data.append(match)
+                # Vérifier si "final_answer" contient une liste ou un seul objet
+            final_answer = parsed_response["final_answer"]
             
+            if isinstance(final_answer, list):
+                # Si c'est une liste, étendre extracted_data avec ses éléments
+                extracted_data.extend(final_answer)
+            elif isinstance(final_answer, dict):
+                # Si c'est un seul objet JSON, l'ajouter directement
+                extracted_data.append(final_answer)
+            else:
+                raise ValueError("Unexpected format for 'final_answer'. Must be a list or dict.")
+
         except Exception as e:
             print(f"Error calling the API: {e}")
-            break  # Stop processing if an error occurs
-
-    print(f"Total number of extracted data : {len(extracted_data)}")
+            break
+        time.sleep(1)
     return extracted_data
 
 # Base prompt template to guide GPT toward mapping a foreign account to French PCG accounts
@@ -212,31 +207,38 @@ For each foreign account provided, carefully analyze the following information:
 Account Number: {account_number},Label: {label}, Type: {account_type}
 Then, identify the corresponding French PCG account. Make sure to consider and fully process every account provided, without omitting any.
 """
-
-def extract_from_list(response_list, acc_type):
+def extract_from_list(response_input, acc_type):
     """
-    Convert a list of extracted tuples into a DataFrame. Each tuple should contain:
-    (account_number, foreign_label, corresponding_coa_account, corresponding_coa_label, justification).
-    
+    Convert a JSON string or a list of dictionaries into a DataFrame. Each dictionary should contain keys:
+    ['account_number', 'label', 'coa_account', 'coa_label', 'justification'].
+
     The returned DataFrame will have the following columns:
     ['n° de compte', 'Libelle', 'BS ou P&L', 'Compte COA', 'Libelle COA', 'Justification']
-    
+
     Parameters:
-    - response_list: A list of tuples extracted from the GPT responses.
+    - response_input: A list of dictionaries extracted from the GPT responses.
     - acc_type: The account type ('BS' or 'P&L'), added as a column in the final DataFrame.
-    
+
     Returns:
     A pandas DataFrame containing the structured mapping results.
     """
-    
-
-    st.write(f"Started processing {acc_type} accounts")
 
     data = []
-    for match in response_list:
-        numero, label, coa_account, coa_label, justification = match
-        data.append([numero.strip(), label.strip(), acc_type, coa_account.strip(), coa_label.strip(), justification.strip()])
+    for item in response_input:
+        try:
+                # Extracting data from the dictionary
+            numero = item['account_number']
+            label = item['label']
+            coa_account = item['coa_account']
+            coa_label = item['coa_label']
+            justification = item['justification']
 
+                # Append the extracted information to the data list
+            data.append([numero, label, acc_type, coa_account, coa_label, justification])
+        except AttributeError:
+            st.write("Error processing entry: ", item)
+
+    # Create the DataFrame
     df = pd.DataFrame(
         data,
         columns=['n° de compte', 'Libelle', 'BS ou P&L', 'Compte COA', 'Libelle COA', 'Justification']
@@ -252,6 +254,26 @@ def remove_double_asterisks(df):
             # Remplacer toutes les occurrences de '**' par '' (une chaîne vide)
             df[col] = df[col].str.replace('**', '', regex=False)
     return df
+def normalize_number(num_str: str) -> str:
+    """
+    Normalize a numeric-like string by removing leading asterisks and spaces, and converting to an integer-like string if possible.
+
+    Parameters:
+    - num_str: The input string to normalize.
+
+    Returns:
+    - A normalized string representing the number, or the original string if not convertible.
+    """
+    try:
+        # Strip leading and trailing spaces and remove leading '*'
+        num_str = num_str.strip().lstrip('*').strip()
+
+        # Attempt to convert the cleaned string to a number and back to string
+        num = float(num_str)
+        return str(int(num)) if num.is_integer() else str(num)
+    except (ValueError, AttributeError):
+        # Return the original string if conversion fails
+        return num_str
 def main():
     """
     Main Streamlit application logic:
@@ -288,7 +310,7 @@ def main():
 
     # Allow the user to download the template file
     st.download_button(
-        label="Download the template file",
+        label="Download template",
         data=template,
         file_name="Template_TranscoGPT.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -297,55 +319,88 @@ def main():
     # File uploader for the user's Excel file
     file_uploaded = st.file_uploader("Please upload an Excel file only.", type=["xlsx"])
     if file_uploaded is not None:
+
         df = pd.read_excel(file_uploaded)
         numero_acc_column = df.columns[0]
         label_column = df.columns[1]
         bs_pl_column = df.columns[2]
         df[bs_pl_column] = df[bs_pl_column].apply(clean_text)
         lines_bs = df[df[bs_pl_column] == 'BS']
+        lines_bs = lines_bs.drop_duplicates()
         lines_pl = df[df[bs_pl_column] == 'P&L']
         del df
 
         if lines_bs.empty:
-            st.warning("No BS accounts found.")
+            st.warning("No Balance Sheet accounts found.")
             total_bs = 0
             lines_bs = []
         else:
-            st.info(f"Found {len(lines_bs)} BS accounts.")
+            st.info(f"Found {len(lines_bs)} Balance Sheet accounts.")
             total_bs = len(lines_bs)
                 # Prepare BS lines for GPT processing
             lines_bs = lines_bs.apply(lambda row: f"{row[numero_acc_column]},{row[label_column]},{row[bs_pl_column]}", axis=1).tolist()
-
+            print(f"the lines_bs are {lines_bs}")
         if lines_pl.empty:
-            st.warning("No P&L accounts found.")
+            st.warning("No Profit and Loss accounts found.")
             total_pl = 0
             lines_pl = []
         else:
-            st.info(f"Found {len(lines_pl)} P&L accounts.")
+            st.info(f"Found {len(lines_pl)} Profit and Loss accounts.")
             total_pl = len(lines_pl)
                 # Prepare P&L lines for GPT processing
-            lines_pl = lines_pl.apply(lambda row: f"{row[numero_acc_column]} - {row[label_column]} - {row[bs_pl_column]}", axis=1).tolist()
-                # displaying language options : "French" and "English"
-        language = st.selectbox(
-                    "Choose a language:", 
-                    ( "English"),  # Options
-                    index=0  # Default value is french
-                )
-
-            # Once user is ready, process the data
+            lines_pl = lines_pl.apply(lambda row: f"{row[numero_acc_column]},{row[label_column]},{row[bs_pl_column]}", axis=1).tolist()
         if st.button("GO"):
 
-                # Afficher la sélection
-            st.write(f"You selected: {language}")
 
             if  lines_bs:
-                extracted_data_bs = process_with_gpt_in_batches(base_prompt, lines_bs, model, 'BS',language,max_tokens=16000)
+                
+                extracted_data_bs = process_with_gpt_in_batches(base_prompt, lines_bs, model, 'BS',max_tokens=16000)
+                processed_numbers = {item['account_number'] for item in extracted_data_bs}
+                #print(f"Processed numbers before update: {processed_numbers}")
+            # We determine the lines that have not been processed yet
+                remaining_lines_bs = [line for line in lines_bs if line.split(',')[0].strip() not in processed_numbers]
+                #print(f"the remaining lines before loop are {remaining_lines_bs}")
+                while remaining_lines_bs:
+                    time.sleep(2)
+                    # we process the remaining lines
+                    new_data = process_with_gpt_in_batches(base_prompt, remaining_lines_bs, model, 'BS', max_tokens=16000)
+                    extracted_data_bs.extend(new_data)
+                   
+                    # Add accounts numbers to the processed set
+                    for item in new_data:
+                        account_number = item['account_number']
+                        if account_number not in processed_numbers:
+                            processed_numbers.add(account_number)
+                    #print(f"Processed numbers after update: {processed_numbers}")
+                    # Mise à jour des lignes restantes
+                    remaining_lines_bs = [line for line in lines_bs if line.split(',')[0].strip() not in processed_numbers]
+                    #print(f"the remaining lines inside loop are {remaining_lines_bs}")
                 df_bs = extract_from_list(extracted_data_bs, 'BS')
             else:
                 df_bs = pd.DataFrame()
-
+            
             if lines_pl:
-                extracted_data_pl = process_with_gpt_in_batches(base_prompt, lines_pl, model, 'P&L',language,max_tokens=16000)
+                extracted_data_pl = process_with_gpt_in_batches(base_prompt, lines_pl, model, 'P&L',max_tokens=16000)
+                processed_numbers = {item['account_number'] for item in extracted_data_pl}
+                #print(f"Processed numbers before update: {processed_numbers}")
+            # We determine the lines that have not been processed yet
+                remaining_lines_pl = [line for line in lines_pl if line.split(',')[0].strip() not in processed_numbers]
+                #print(f"the remaining lines before loop are {remaining_lines_pl}")
+                while remaining_lines_pl:
+                    time.sleep(2)
+                    # we process the remaining lines
+                    new_data = process_with_gpt_in_batches(base_prompt, remaining_lines_pl, model, 'P&L', max_tokens=16000)
+                    extracted_data_pl.extend(new_data)
+                   
+                    # Add accounts numbers to the processed set
+                    for item in new_data:
+                        account_number = item['account_number']
+                        if account_number not in processed_numbers:
+                            processed_numbers.add(account_number)
+                    #print(f"Processed numbers after update: {processed_numbers}")
+                    # Mise à jour des lignes restantes
+                    remaining_lines_pl = [line for line in lines_pl if line.split(',')[0].strip() not in processed_numbers]
+                    #print(f"the remaining lines inside loop are {remaining_lines_pl}")
                 df_pl = extract_from_list(extracted_data_pl, 'P&L')
             else:
                 df_pl = pd.DataFrame()
@@ -353,22 +408,20 @@ def main():
                 # Combine results and prepare for download
             df = pd.concat([df_bs, df_pl], ignore_index=True)
             df_size = len(df)
-            st.info(f"Finished processing {df_size}/{total_file} accounts.")
+            st.info(f"Successfully processed {df_size}/{total_file} accounts.")
             df = remove_double_asterisks(df)
             output = io.BytesIO()
             df.to_excel(output, index=False, engine='xlsxwriter')
             
 
             output.seek(0)
-
-            st.success("Tap to download your processed file.")
+            st.success("Tap to download your completed file.")
             st.download_button(
                     label="Download processed file",
                     data=output,
-                    file_name="output_traduit.xlsx",
+                    file_name="transco_gpt.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
       
 if __name__ == "__main__":
     main()
