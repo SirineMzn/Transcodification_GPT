@@ -1,0 +1,2 @@
+2024-12-13 17:12:50,879 - data_processor - ERROR - Error loading COA file: [Errno 2] No such file or directory: 'C:\\Users\\SirineMazooun\\Downloads\\Claude3_propal\\Claude3_propal\\data\\COA_simplifié_TC2.xlsx'
+2024-12-13 17:12:50,885 - data_processor - ERROR - Failed to initialize DataProcessor: [Errno 2] No such file or directory: 'C:\\Users\\SirineMazooun\\Downloads\\Claude3_propal\\Claude3_propal\\data\\COA_simplifié_TC2.xlsx'
