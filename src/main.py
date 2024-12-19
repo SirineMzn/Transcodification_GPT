@@ -13,7 +13,7 @@ from utils import setup_logging, validate_file
 from data_processor import DataProcessor
 from api_handler import APIHandler
 from ui_components import UI
-
+import time
 logger = logging.getLogger(__name__)
 
 class TranscoGPT:
@@ -113,23 +113,71 @@ class TranscoGPT:
             # Process accounts when user clicks GO
             if st.button("GO"):
                 # Process BS accounts
-                bs_data = await self.process_accounts(bs_lines, 'BS')
-                bs_df = self.data_processor.process_results(bs_data, 'BS')
+                if bs_lines:
+                    bs_data = await self.process_accounts(bs_lines, 'BS')
+                    processed_numbers = {item['account_number'] for item in bs_data}
+                    
+                    # Check for unprocessed BS accounts
+                    remaining_bs_lines = [line for line in bs_lines 
+                                        if line.split(',')[0].strip() not in processed_numbers]
+                    
+                    while remaining_bs_lines:
+                        time.sleep(APIConfig.RETRY_DELAY)
+                        new_data = await self.process_accounts(remaining_bs_lines, 'BS')
+                        bs_data.extend(new_data)
+                        
+                        # Update processed accounts
+                        for item in new_data:
+                            processed_numbers.add(item['account_number'])
+                        
+                        # Update remaining lines
+                        remaining_bs_lines = [line for line in bs_lines 
+                                            if line.split(',')[0].strip() not in processed_numbers]
+                    
+                    bs_df = self.data_processor.process_results(bs_data, 'BS')
+                else:
+                    bs_df = pd.DataFrame()
 
                 # Process P&L accounts
-                pl_data = await self.process_accounts(pl_lines, 'P&L')
-                pl_df = self.data_processor.process_results(pl_data, 'P&L')
+                if pl_lines:
+                    pl_data = await self.process_accounts(pl_lines, 'P&L')
+                    processed_numbers = {item['account_number'] for item in pl_data}
+                    
+                    # Check for unprocessed P&L accounts
+                    remaining_pl_lines = [line for line in pl_lines 
+                                        if line.split(',')[0].strip() not in processed_numbers]
+                    
+                    while remaining_pl_lines:
+                        time.sleep(APIConfig.RETRY_DELAY)
+                        new_data = await self.process_accounts(remaining_pl_lines, 'P&L')
+                        pl_data.extend(new_data)
+                        
+                        # Update processed accounts
+                        for item in new_data:
+                            processed_numbers.add(item['account_number'])
+                        
+                        # Update remaining lines
+                        remaining_pl_lines = [line for line in pl_lines 
+                                            if line.split(',')[0].strip() not in processed_numbers]
+                    
+                    pl_df = self.data_processor.process_results(pl_data, 'P&L')
+                else:
+                    pl_df = pd.DataFrame()
 
                 # Combine and clean results
                 final_df = pd.concat([bs_df, pl_df], ignore_index=True)
                 final_df = self.data_processor.clean_final_output(final_df)
 
-                # Display results
-                self.ui.display_results(final_df, bs_count + pl_count)
+                # Display results and processing summary
+                total_processed = len(final_df)
+                total_accounts = bs_count + pl_count
+                self.ui.display_results(final_df, total_accounts)
+                st.info(f"Successfully processed {total_processed}/{total_accounts} accounts.")
 
         except Exception as e:
             logger.error(f"Application error: {str(e)}")
             self.ui.display_error(str(e))
+
 
     def calculate_cost(self, bs_lines: list, pl_lines: list) -> float:
         """
