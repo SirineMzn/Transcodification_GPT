@@ -157,7 +157,7 @@ class DataProcessor:
                 df[col] = df[col].str.replace('**', '', regex=False)
         
         # Normalize account numbers
-        df['n° de compte'] = df['n° de compte'].apply(normalize_number)
-        df['Compte COA'] = df['Compte COA'].apply(normalize_number)
+        df['Account Number'] = df['Account Number'].apply(normalize_number)
+        df['COA code'] = df['COA code'].apply(normalize_number)
         
         return df
