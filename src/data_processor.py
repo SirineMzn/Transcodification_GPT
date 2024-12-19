@@ -137,8 +137,8 @@ class DataProcessor:
         
         return pd.DataFrame(
             data,
-            columns=['n° de compte', 'Libelle', 'BS ou P&L', 
-                    'Compte COA', 'Libelle COA', 'Justification']
+            columns=['Account Number', 'Label', 'Account Type', 
+                    'COA code', 'COA label', 'Justification']
         )
 
     def clean_final_output(self, df: pd.DataFrame) -> pd.DataFrame:
