@@ -7,9 +7,49 @@ import openai
 import io
 import time
 import json
+from datadog import initialize, api
+from dotenv import load_dotenv
+from ddtrace import patch_all,tracer
+import socket
 
+load_dotenv()
 
+def initialize_datadog():
+    """Initialize Datadog configuration"""
+    options = {
+        'api_key': st.secrets["DATADOG_API_KEY"]["DATADOG_API_KEY"],
+        'api_host': 'https://api.datadoghq.eu',  # ou .com selon votre région
+        'dd_site': 'datadoghq.eu'
+    }
+    
+    try:
+        initialize(**options)
+        patch_all()
+        return True
+    except Exception as e:
+        st.warning(f"Erreur d'initialisation Datadog: {str(e)}")
+        return False
+class DatadogMetrics:
+    def __init__(self):
+        self.initialized = initialize_datadog()
+    
+    def send_metric(self, metric_name, value, tags=None):
+        if not self.initialized:
+            return
+            
+        try:
+            # Envoi direct à l'API Datadog
+            metrics = [{
+                'metric': metric_name,
+                'points': [[int(time.time()), value]],
+                'tags': tags or []
+            }]
+            api.Metric.send(metrics)
+        except Exception as e:
+            st.warning(f"Erreur d'envoi de métrique: {str(e)}")
 
+# Initialiser les métriques une seule fois
+metrics = DatadogMetrics()
 # Set the OpenAI model name (ensure the model is supported by your OpenAI subscription)
 model = "gpt-4o-2024-11-20"
 
@@ -126,8 +166,10 @@ def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles=25, max_to
 def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_tokens=16000):
     remaining_lines = lines
     extracted_data = []
+    start_time = time.time()
     
     while remaining_lines:
+        start_time = time.time()
         prompt, remaining_lines, _ = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 25, max_tokens)
         prompt += "\n"
 
@@ -191,8 +233,28 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_toke
                 extracted_data.append(final_answer)
             else:
                 raise ValueError("Unexpected format for 'final_answer'. Must be a list or dict.")
-
+            # Tracking Datadog
+            duration = time.time() - start_time
+            metrics.send_metric(
+            'gpt.request.duration',
+            duration,
+            [
+                'status:success',
+                f'model:{model}',
+                f'type:{type_compte}'
+            ]
+        )
         except Exception as e:
+            duration = time.time() - start_time
+            metrics.send_metric(
+            'gpt.request.error',
+            duration,
+            [
+                'status:error',
+                f'model:{model}',
+                f'type:{type_compte}'
+            ]
+        )
             print(f"Error calling the API: {e}")
             break
         time.sleep(1)
@@ -360,9 +422,7 @@ def main():
         
         if st.button("GO"):
 
-
             if  lines_bs:
-                
                 extracted_data_bs = process_with_gpt_in_batches(base_prompt, lines_bs, model, 'BS',max_tokens=16000)
                 processed_numbers = {item['account_number'] for item in extracted_data_bs}
                 #print(f"Processed numbers before update: {processed_numbers}")
@@ -374,7 +434,7 @@ def main():
                     # we process the remaining lines
                     new_data = process_with_gpt_in_batches(base_prompt, remaining_lines_bs, model, 'BS', max_tokens=16000)
                     extracted_data_bs.extend(new_data)
-                   
+                
                     # Add accounts numbers to the processed set
                     for item in new_data:
                         account_number = item['account_number']
@@ -400,7 +460,7 @@ def main():
                     # we process the remaining lines
                     new_data = process_with_gpt_in_batches(base_prompt, remaining_lines_pl, model, 'P&L', max_tokens=16000)
                     extracted_data_pl.extend(new_data)
-                   
+                
                     # Add accounts numbers to the processed set
                     for item in new_data:
                         account_number = item['account_number']
@@ -422,7 +482,7 @@ def main():
             output = io.BytesIO()
             df.to_excel(output, index=False, engine='xlsxwriter')
             
-
+    
             output.seek(0)
             st.success("Tap to download your completed file.")
             st.download_button(
@@ -431,6 +491,7 @@ def main():
                     file_name="transco_gpt.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+            
       
 if __name__ == "__main__":
     main()
