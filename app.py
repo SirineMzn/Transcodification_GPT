@@ -14,7 +14,7 @@ import requests
 class DatadogTracer:
     def __init__(self):
         self.api_key = st.secrets["DATADOG_API_KEY"]["DATADOG_API_KEY"]
-        self.intake_url = "https://trace.agent.datadoghq.eu/api/v0.2/traces"
+        
         
     def send_trace(self, name, duration, tags=None, error=None):
         timestamp = int(time.time() * 1e9)
