@@ -8,11 +8,9 @@ import io
 import time
 import json
 from datadog import initialize, api
-from dotenv import load_dotenv
 from ddtrace import patch_all,tracer
 import requests
 
-load_dotenv()
 class DatadogTracer:
     def __init__(self):
         self.api_key = st.secrets["DATADOG_API_KEY"]["DATADOG_API_KEY"]
