@@ -10,3 +10,4 @@ openpyxl
 xlsxwriter
 ddtrace
 requests
+datadog
