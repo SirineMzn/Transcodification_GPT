@@ -10,10 +10,51 @@ import json
 from datadog import initialize, api
 from dotenv import load_dotenv
 from ddtrace import patch_all,tracer
-import socket
+import requests
 
 load_dotenv()
+class DatadogTracer:
+    def __init__(self):
+        self.api_key = st.secrets["DATADOG_API_KEY"]["DATADOG_API_KEY"]
+        self.intake_url = "https://trace.agent.datadoghq.eu/api/v0.2/traces"
+        
+    def send_trace(self, name, duration, tags=None, error=None):
+        timestamp = int(time.time() * 1e9)
+        
+        span = {
+            "name": name,
+            "service": "transcogpt-app",
+            "resource": name,
+            "trace_id": int(time.time() * 1e6),
+            "span_id": int(time.time() * 1e6),
+            "start": timestamp - int(duration * 1e9),
+            "duration": int(duration * 1e9),
+            "error": 1 if error else 0,
+            "meta": {
+                "env": "production",
+                **{k: str(v) for k, v in (tags or {}).items()}
+            }
+        }
+        
+        if error:
+            span["meta"]["error.msg"] = str(error)
+            span["meta"]["error.type"] = type(error).__name__
 
+        try:
+            response = requests.put(
+                self.intake_url,
+                headers={
+                    "DD-API-KEY": self.api_key,
+                    "Content-Type": "application/json"
+                },
+                json=[[span]]
+            )
+            if response.status_code != 200:
+                st.warning(f"Erreur d'envoi de trace: {response.text}")
+        except Exception as e:
+            st.warning(f"Erreur de traçage: {str(e)}")
+
+# Initialisation du tracer
 def initialize_datadog():
     """Initialize Datadog configuration"""
     options = {
@@ -48,7 +89,8 @@ class DatadogMetrics:
         except Exception as e:
             st.warning(f"Erreur d'envoi de métrique: {str(e)}")
 
-# Initialiser les métriques une seule fois
+tracer = DatadogTracer()
+
 metrics = DatadogMetrics()
 # Set the OpenAI model name (ensure the model is supported by your OpenAI subscription)
 model = "gpt-4o-2024-11-20"
@@ -166,10 +208,10 @@ def prepare_prompt_with_limit(base_prompt, lines, model, max_libelles=25, max_to
 def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_tokens=16000):
     remaining_lines = lines
     extracted_data = []
-    start_time = time.time()
+    batch_start_time = time.time()
     
     while remaining_lines:
-        start_time = time.time()
+        request_start_time = time.time()
         prompt, remaining_lines, _ = prepare_prompt_with_limit(base_prompt, remaining_lines, model, 25, max_tokens)
         prompt += "\n"
 
@@ -233,31 +275,67 @@ def process_with_gpt_in_batches(base_prompt, lines, model, type_compte, max_toke
                 extracted_data.append(final_answer)
             else:
                 raise ValueError("Unexpected format for 'final_answer'. Must be a list or dict.")
-            # Tracking Datadog
-            duration = time.time() - start_time
+            # Tracer le succès
+            duration = time.time() - request_start_time
+            tracer.send_trace(
+                name="gpt_request",
+                duration=duration,
+                tags={
+                    "model": model,
+                    "type": type_compte,
+                    "batch_size": len(final_answer) if isinstance(final_answer, list) else 1,
+                    "status": "success"
+                }
+            )
+            
+            # Envoyer aussi la métrique
             metrics.send_metric(
-            'gpt.request.duration',
-            duration,
-            [
-                'status:success',
-                f'model:{model}',
-                f'type:{type_compte}'
-            ]
-        )
+                'gpt.request.duration',
+                duration,
+                [
+                    'status:success',
+                    f'model:{model}',
+                    f'type:{type_compte}'
+                ]
+            )
         except Exception as e:
-            duration = time.time() - start_time
+            duration = time.time() - request_start_time
+            # Tracer l'erreur
+            tracer.send_trace(
+                name="gpt_request",
+                duration=duration,
+                tags={
+                    "model": model,
+                    "type": type_compte,
+                    "batch_size": len(remaining_lines),
+                    "status": "error"
+                },
+                error=e
+            )
+            
+            # Envoyer la métrique d'erreur
             metrics.send_metric(
-            'gpt.request.error',
-            duration,
-            [
-                'status:error',
-                f'model:{model}',
-                f'type:{type_compte}'
-            ]
-        )
+                'gpt.request.error',
+                duration,
+                [
+                    'status:error',
+                    f'model:{model}',
+                    f'type:{type_compte}'
+                ]
+            )
             print(f"Error calling the API: {e}")
+
             break
         time.sleep(1)
+        tracer.send_trace(
+        name="process_batch",
+        duration=time.time() - batch_start_time,
+        tags={
+            "model": model,
+            "type": type_compte,
+            "total_processed": len(extracted_data)
+        }
+    )
     return extracted_data
 
 # Base prompt template to guide GPT toward mapping a foreign account to French PCG accounts

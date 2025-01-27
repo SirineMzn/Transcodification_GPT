@@ -9,3 +9,4 @@ tiktoken
 openpyxl
 xlsxwriter
 ddtrace
+requests
