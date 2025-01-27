@@ -11,43 +11,19 @@ from datadog import initialize, api
 from ddtrace import patch_all,tracer
 import requests
 
-class DatadogTracer:
-    def __init__(self):
-        self.api_key = st.secrets["DATADOG_API_KEY"]["DATADOG_API_KEY"]
-    
-    def send_trace(self, name, duration, tags=None, error=None):
-        try:
-            metric_data = {
-                'series': [{
-                    'metric': f'app.{name}',
-                    'type': 'gauge',
-                    'points': [[int(time.time()), duration]],
-                    'tags': [
-                        'service:transcogpt-app',
-                        'env:production',
-                        *[f'{k}:{v}' for k, v in (tags or {}).items()]
-                    ]
-                }]
-            }
-
-            api.Metric.send(metric_data)
-
-        except Exception as e:
-            st.warning(f"Erreur de traçage: {str(e)}")
-
 
 # Initialisation du tracer
 def initialize_datadog():
     """Initialize Datadog configuration"""
     options = {
         'api_key': st.secrets["DATADOG_API_KEY"]["DATADOG_API_KEY"],
-        'api_host': 'https://api.datadoghq.eu',  # ou .com selon votre région
-        'dd_site': 'datadoghq.eu'
+        'api_host': 'https://api.datadoghq.eu',
+        'dd_site': 'datadoghq.eu',
+        'disable_trace_agent': True
     }
     
     try:
         initialize(**options)
-        patch_all()
         return True
     except Exception as e:
         st.warning(f"Erreur d'initialisation Datadog: {str(e)}")
@@ -71,7 +47,6 @@ class DatadogMetrics:
         except Exception as e:
             st.warning(f"Erreur d'envoi de métrique: {str(e)}")
 
-tracer = DatadogTracer()
 
 metrics = DatadogMetrics()
 # Set the OpenAI model name (ensure the model is supported by your OpenAI subscription)
