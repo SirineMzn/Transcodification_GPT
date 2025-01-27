@@ -14,43 +14,27 @@ import requests
 class DatadogTracer:
     def __init__(self):
         self.api_key = st.secrets["DATADOG_API_KEY"]["DATADOG_API_KEY"]
-        
-        
+    
     def send_trace(self, name, duration, tags=None, error=None):
-        timestamp = int(time.time() * 1e9)
-        
-        span = {
-            "name": name,
-            "service": "transcogpt-app",
-            "resource": name,
-            "trace_id": int(time.time() * 1e6),
-            "span_id": int(time.time() * 1e6),
-            "start": timestamp - int(duration * 1e9),
-            "duration": int(duration * 1e9),
-            "error": 1 if error else 0,
-            "meta": {
-                "env": "production",
-                **{k: str(v) for k, v in (tags or {}).items()}
-            }
-        }
-        
-        if error:
-            span["meta"]["error.msg"] = str(error)
-            span["meta"]["error.type"] = type(error).__name__
-
         try:
-            response = requests.put(
-                self.intake_url,
-                headers={
-                    "DD-API-KEY": self.api_key,
-                    "Content-Type": "application/json"
-                },
-                json=[[span]]
-            )
-            if response.status_code != 200:
-                st.warning(f"Erreur d'envoi de trace: {response.text}")
+            metric_data = {
+                'series': [{
+                    'metric': f'app.{name}',
+                    'type': 'gauge',
+                    'points': [[int(time.time()), duration]],
+                    'tags': [
+                        'service:transcogpt-app',
+                        'env:production',
+                        *[f'{k}:{v}' for k, v in (tags or {}).items()]
+                    ]
+                }]
+            }
+
+            api.Metric.send(metric_data)
+
         except Exception as e:
             st.warning(f"Erreur de traçage: {str(e)}")
+
 
 # Initialisation du tracer
 def initialize_datadog():
